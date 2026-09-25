@@ -168,54 +168,13 @@ my_ride/
 
 ---
 
-## 🛠️ Local Development Setup
+## 🎯 Platform Roles & Core Capabilities
 
-### Prerequisites
-- **Node.js** (v18 or higher)
-- **npm** or **yarn**
-- **MongoDB Atlas** account (or local MongoDB)
-
-### 1. Clone the repository:
-```bash
-git clone https://github.com/aaashishguptaaa/my_ride.git
-cd my_ride
-```
-
-### 2. Configure Environment Variables:
-Create `.env.local` inside `my_ride/`:
-```env
-MONGODB_URL=your_mongodb_connection_string
-AUTH_SECRET=your_nextauth_secret
-NEXT_PUBLIC_SOCKET_SERVER_URL=http://localhost:8000
-AUTH_GOOGLE_ID=your_google_client_id
-AUTH_GOOGLE_SECRET=your_google_client_secret
-EMAIL=your_gmail_address
-PASS=your_gmail_app_password
-CLOUDINARY_CLOUD_NAME=your_cloudinary_name
-CLOUDINARY_API_KEY=your_cloudinary_key
-CLOUDINARY_API_SECRET=your_cloudinary_secret
-NEXT_PUBLIC_ZEGO_APP_ID=your_zego_app_id
-NEXT_PUBLIC_ZEGO_SERVER_SECRET=your_zego_secret
-NEXT_PUBLIC_GEOAPIFY_API_KEY=your_geoapify_key
-RAZORPAY_KEY_ID=your_razorpay_key
-RAZORPAY_KEY_SECRET=your_razorpay_secret
-NEXT_PUBLIC_RAZORPAY_KEY_ID=your_razorpay_key
-```
-
-### 3. Run the Next.js App:
-```bash
-cd my_ride
-npm install
-npm run dev
-```
-Open **[http://localhost:3000](http://localhost:3000)** in your browser.
-
-### 4. Run the Socket Server (in a separate terminal):
-```bash
-cd socketServer
-npm install
-npm start
-```
+| Role | Key Capabilities & Experience |
+| :--- | :--- |
+| 🚖 **Passenger** | • Instant nearby vehicle lookup with interactive Leaflet map routing<br/>• Real-time driver radar and live vehicle tracking<br/>• Pickup OTP verification for passenger safety<br/>• In-ride live chat with AI smart suggestions<br/>• Flexible payment options: pay advance or comfortably upon destination drop-off |
+| 🚗 **Driver / Partner** | • Instant 1-tap **Online / Offline** status switch (controls vehicle visibility on the map)<br/>• Real-time WebSocket dispatch alerts with sub-second delivery<br/>• Atomic concurrency acceptance (zero duplicate bookings)<br/>• Active ride cockpit with live radar and pickup verification<br/>• Earnings and trip history tracker<br/>• 1-click seamless switch to Passenger Mode (zero re-verification needed) |
+| 🛡️ **Admin** | • Multi-vendor partner and document review dashboard<br/>• Real-time face-to-face **Video KYC** calling room via ZEGOCLOUD<br/>• Vehicle approval/rejection panel with custom feedback reasons<br/>• Financial oversight: platform commissions, partner earnings, and ride KPIs |
 
 ---
 
