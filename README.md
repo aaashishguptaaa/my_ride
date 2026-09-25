@@ -1,6 +1,10 @@
 # 🚗 MY_RIDE - Smart Vehicle & Ride Booking Platform
 
-MY_RIDE is a modern, full-stack vehicle and ride booking platform built with Next.js 16, React 19, Socket.IO, Tailwind CSS, and MongoDB.
+[![Live App](https://img.shields.io/badge/Live%20Website-myride--ten.vercel.app-brightgreen?style=for-the-badge&logo=vercel)](https://myride-ten.vercel.app)
+[![Socket Server](https://img.shields.io/badge/Socket%20Server-Online%20(Render)-blue?style=for-the-badge&logo=render)](https://myride-socket.onrender.com)
+
+> 🔗 **Live Website URL:** **[https://myride-ten.vercel.app](https://myride-ten.vercel.app)**  
+> ⚡ **Live WebSocket Server:** **[https://myride-socket.onrender.com](https://myride-socket.onrender.com)**
 
 ---
 
@@ -26,7 +30,7 @@ MY_ride/
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting Started Locally
 
 ### 1. Web Application (`my_ride`)
 ```bash
