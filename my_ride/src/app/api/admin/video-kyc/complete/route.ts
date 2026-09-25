@@ -1,0 +1,89 @@
+import { auth } from "@/auth";
+import connectDb from "@/lib/db";
+import User from "@/models/user.model";
+import axios from "axios";
+import { NextRequest } from "next/server";
+
+export async function POST(req: NextRequest) {
+    try {
+        await connectDb()
+        const session = await auth()
+        if (!session || !session.user?.email) {
+            return Response.json({ message: "unauthorized" }, { status: 401 })
+        }
+
+        let role = session.user.role
+        if (role !== "admin") {
+            const dbUser = await User.findOne({ email: session.user.email })
+            if (dbUser) role = dbUser.role
+        }
+
+        if (role !== "admin") {
+            return Response.json({ message: "unauthorized" }, { status: 403 })
+        }
+
+        const { roomId, action, reason } = await req.json()
+        if (!roomId) {
+            return Response.json({ message: "roomId is required" }
+                , { status: 400 }
+            )
+        }
+
+        if (!["approved", "rejected"].includes(action)) {
+            return Response.json({ message: "invalid action" }
+                , { status: 400 }
+            )
+        }
+
+        const partner = await User.findOne({
+            videoKycRoomId: roomId,
+            role: "partner"
+        })
+
+        if (!partner) {
+            return Response.json({ message: "partner not found" }
+                , { status: 400 }
+            )
+        }
+
+        if (action === "approved") {
+            partner.videoKycStatus = "approved"
+            partner.videoKycRejectionReason = undefined
+            partner.partnerOnBoardingSteps = 5
+        }
+
+        if (action === "rejected") {
+            if (!reason) {
+                return Response.json({ message: "rejection reason is required." }
+                    , { status: 400 }
+                )
+            }
+            partner.videoKycStatus = "rejected"
+            partner.videoKycRejectionReason = reason.trim()
+        }
+
+        await partner.save()
+
+        try {
+            const socketUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:8000"
+            await axios.post(`${socketUrl}/emit`, {
+                event: "kyc-ended",
+                roomId,
+                userId: partner._id,
+                data: { action, reason: partner.videoKycRejectionReason }
+            })
+        } catch (socketErr) {
+            console.error("Socket emit kyc-ended failed:", socketErr)
+        }
+
+        return Response.json({ status: partner.videoKycStatus }
+            , { status: 200 }
+        )
+
+
+    } catch (error) {
+ return Response.json({ message:`kyc complete error ${error}` }
+            , { status: 500 }
+        )
+    }
+}

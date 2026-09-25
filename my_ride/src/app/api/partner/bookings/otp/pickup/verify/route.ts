@@ -1,0 +1,64 @@
+import connectDb from "@/lib/db";
+import { sendMail } from "@/lib/sendMail";
+import Booking from "@/models/booking.model";
+import { NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+
+export async function POST(req:NextRequest) {
+    try {
+        await connectDb()
+        const {bookingId,otp}=await req.json()
+        const booking=await Booking.findById(bookingId).populate("user")
+        if(!booking){
+            return NextResponse.json(
+                {message:"booking not found"},
+                {status:400}
+            )
+        }
+
+        if(!booking.pickUpOtp){
+             return NextResponse.json(
+                {message:"pickup otp not generated"},
+                {status:400}
+            ) 
+        }
+         if(booking.pickUpOtp!=otp){
+             return NextResponse.json(
+                {message:"incorrect pickup otp"},
+                {status:400}
+            ) 
+        }
+         if(booking.pickUpOtpExpires<new Date()){
+             return NextResponse.json(
+                {message:"otp expired"},
+                {status:400}
+            ) 
+        }
+       
+        booking.bookingStatus="started"
+        booking.pickUpOtp=""
+        booking.pickUpOtpExpires=undefined
+        await booking.save()
+
+        try {
+            await axios.post(`${process.env.NEXT_PUBLIC_SOCKET_SERVER_URL}/emit`, {
+                event: "ride-status-update",
+                roomId: bookingId,
+                userId: booking.user?._id || booking.user,
+                data: { status: "started" }
+            })
+        } catch (socketErr) {
+            console.error("Socket emit ride-status-update error:", socketErr)
+        }
+
+        return NextResponse.json(
+            {message:"pickUp otp verified"},
+            {status:200}
+        )
+    } catch (error) {
+         return NextResponse.json(
+            {message:"pick up otp verify error"},
+            {status:500}
+        )
+    }
+}

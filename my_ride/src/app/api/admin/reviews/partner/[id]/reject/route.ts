@@ -1,0 +1,58 @@
+import { auth } from "@/auth"
+import connectDb from "@/lib/db"
+import PartnerBank from "@/models/partnerBank.model"
+import PartnerDocs from "@/models/partnerDocs.model"
+import User from "@/models/user.model"
+
+import { NextRequest } from "next/server"
+
+export async function POST( 
+    req: NextRequest,
+    context: { params: Promise<{ id: string }>}) {
+
+        try {
+        await connectDb()
+        const session = await auth()
+        if (!session || !session.user?.email) {
+            return Response.json({ message: "unauthorized" }, { status: 401 })
+        }
+
+        let role = session.user.role
+        if (role !== "admin") {
+            const dbUser = await User.findOne({ email: session.user.email })
+            if (dbUser) role = dbUser.role
+        }
+
+        if (role !== "admin") {
+            return Response.json({ message: "unauthorized" }, { status: 403 })
+        }
+        const {rejectionReason}=await req.json()
+        const partnerId=(await context.params).id
+        const partner=await User.findById(partnerId)
+
+        if(!partner || partner.role!=="partner"){
+            return Response.json(
+                {message:"partner not found"},
+                {status:400}
+            )
+        }
+
+
+       
+
+        partner.partnerStatus="rejected"
+       partner.rejectionReason=rejectionReason
+        await partner.save()
+       
+        return Response.json(
+           { message:"partner Rejected successfully"},{status:200}
+        )
+
+        } catch (error) {
+           return Response.json(
+           { message:`partner rejected error ${error}`},{status:500}
+        ) 
+        }
+      
+
+}
