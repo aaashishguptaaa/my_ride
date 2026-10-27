@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from "motion/react"
-import { CircleDashed, Lock, Mail, User, X, ArrowLeft, RotateCw, Edit3, CheckCircle2, Eye, EyeOff } from 'lucide-react'
+import { CircleDashed, Lock, Mail, User, X, ArrowLeft, RotateCw, Edit3, CheckCircle2, Eye, EyeOff, KeyRound } from 'lucide-react'
 import Image from 'next/image'
 import Logo from './Logo'
 import axios from 'axios'
@@ -11,7 +11,7 @@ type propType = {
     open: boolean,
     onClose: () => void
 }
-type stepType = "login" | "signup" | "otp"
+type stepType = "login" | "signup" | "otp" | "forgot-password" | "reset-password"
 
 function AuthModal({ open, onClose }: propType) {
     const [step, setStep] = useState<stepType>("login")
@@ -19,6 +19,10 @@ function AuthModal({ open, onClose }: propType) {
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [showPassword, setShowPassword] = useState(false)
+    const [newPassword, setNewPassword] = useState("")
+    const [showNewPassword, setShowNewPassword] = useState(false)
+    const [confirmPassword, setConfirmPassword] = useState("")
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
     const [loading, setLoading] = useState(false)
     const [resending, setResending] = useState(false)
     const [err, setErr] = useState("")
@@ -138,6 +142,80 @@ function AuthModal({ open, onClose }: propType) {
         })
     }
 
+    const handleForgotPasswordSendOtp = async () => {
+        if (!email.trim() || !email.includes("@")) {
+            setErr("Please enter your registered email address.")
+            return
+        }
+        setLoading(true)
+        setErr("")
+        setSuccessMsg("")
+        try {
+            await axios.post("/api/auth/forgot-password/send-otp", { email })
+            setSuccessMsg("A 6-digit password reset code has been sent to your email!")
+            setOtp(["", "", "", "", "", ""])
+            setCountdown(30)
+            setStep("reset-password")
+            setLoading(false)
+        } catch (error: any) {
+            setLoading(false)
+            setErr(error.response?.data?.message ?? "Failed to send password reset code.")
+        }
+    }
+
+    const handleResendForgotPasswordOtp = async () => {
+        if (countdown > 0 || resending) return
+        setResending(true)
+        setErr("")
+        setSuccessMsg("")
+        try {
+            await axios.post("/api/auth/forgot-password/send-otp", { email })
+            setSuccessMsg("A new 6-digit password reset code has been sent to your email!")
+            setCountdown(30)
+            setResending(false)
+        } catch (error: any) {
+            setResending(false)
+            setErr(error.response?.data?.message ?? "Failed to resend code.")
+        }
+    }
+
+    const handleResetPassword = async () => {
+        const fullOtp = otp.join("").trim()
+        if (fullOtp.length < 6) {
+            setErr("Please enter the complete 6-digit verification code.")
+            return
+        }
+        if (newPassword.length < 6) {
+            setErr("New password must be at least 6 characters.")
+            return
+        }
+        if (newPassword !== confirmPassword) {
+            setErr("Passwords do not match. Please verify both fields.")
+            return
+        }
+
+        setLoading(true)
+        setErr("")
+        setSuccessMsg("")
+        try {
+            const { data } = await axios.post("/api/auth/forgot-password/verify-reset", {
+                email,
+                otp: fullOtp,
+                newPassword
+            })
+            setLoading(false)
+            setNewPassword("")
+            setConfirmPassword("")
+            setOtp(["", "", "", "", "", ""])
+            setPassword("")
+            setSuccessMsg(data?.message || "Password reset successfully! Please log in with your new password.")
+            setStep("login")
+        } catch (error: any) {
+            setLoading(false)
+            setErr(error.response?.data?.message ?? "Failed to reset password. Please try again.")
+        }
+    }
+
     const handleChangeOtp = (index: number, value: string) => {
         if (!/^[0-9]?$/.test(value)) return
         const updated = [...otp]
@@ -189,7 +267,7 @@ function AuthModal({ open, onClose }: propType) {
                                 </div>
 
                                 {/* Only show Google OAuth on Login / Signup steps */}
-                                {step !== "otp" && (
+                                {(step === "login" || step === "signup") && (
                                     <>
                                         <button
                                             className='w-full h-11 rounded-xl border border-black/20 flex items-center justify-center gap-3 text-sm font-semibold hover:bg-black hover:text-white transition cursor-pointer'
@@ -208,6 +286,7 @@ function AuthModal({ open, onClose }: propType) {
                                 )}
 
                                 <div>
+                                    {/* 1. LOGIN STEP */}
                                     {step === "login" && (
                                         <motion.div
                                             initial={{ opacity: 0, x: -20 }}
@@ -249,6 +328,20 @@ function AuthModal({ open, onClose }: propType) {
                                                     </button>
                                                 </div>
 
+                                                <div className="flex justify-end">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setStep("forgot-password")
+                                                            setErr("")
+                                                            setSuccessMsg("")
+                                                        }}
+                                                        className="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition"
+                                                    >
+                                                        Forgot Password?
+                                                    </button>
+                                                </div>
+
                                                 {err && <p className='text-xs text-red-500 font-medium'>*{err}</p>}
 
                                                 <button
@@ -268,6 +361,7 @@ function AuthModal({ open, onClose }: propType) {
                                         </motion.div>
                                     )}
 
+                                    {/* 2. SIGNUP STEP */}
                                     {step === "signup" && (
                                         <motion.div
                                             initial={{ opacity: 0, x: 20 }}
@@ -333,6 +427,7 @@ function AuthModal({ open, onClose }: propType) {
                                         </motion.div>
                                     )}
 
+                                    {/* 3. SIGNUP OTP VERIFICATION STEP */}
                                     {step === "otp" && (
                                         <motion.div
                                             key="otp"
@@ -420,6 +515,198 @@ function AuthModal({ open, onClose }: propType) {
                                             </div>
 
                                             <p className="mt-3 text-[11px] text-gray-400 text-center">
+                                                💡 Please check your <strong>Spam</strong> or <strong>Junk</strong> folder if you don't see it in your inbox.
+                                            </p>
+                                        </motion.div>
+                                    )}
+
+                                    {/* 4. FORGOT PASSWORD STEP (ENTER EMAIL) */}
+                                    {step === "forgot-password" && (
+                                        <motion.div
+                                            key="forgot-password"
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: -20 }}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <button
+                                                    onClick={() => { setStep("login"); setErr(""); setSuccessMsg("") }}
+                                                    className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-black font-bold cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition"
+                                                >
+                                                    <ArrowLeft size={14} /> Back to Login
+                                                </button>
+                                                <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 flex items-center gap-1">
+                                                    <KeyRound size={11} /> Password Recovery
+                                                </span>
+                                            </div>
+
+                                            <h2 className='text-xl font-bold mt-4 text-gray-900'>Forgot Password?</h2>
+                                            <p className='mt-1 text-xs text-gray-500'>
+                                                Enter your registered email address and we will send you a 6-digit verification code to reset your password.
+                                            </p>
+
+                                            <div className='mt-5 space-y-4'>
+                                                <div className='flex items-center gap-3 border border-black/20 rounded-xl px-4 py-3 focus-within:border-black transition'>
+                                                    <Mail size={18} className='text-gray-500' />
+                                                    <input
+                                                        type="email"
+                                                        placeholder='Enter your email address'
+                                                        className='w-full bg-transparent outline-none text-sm'
+                                                        onChange={(e) => setEmail(e.target.value)}
+                                                        value={email}
+                                                        autoFocus
+                                                    />
+                                                </div>
+
+                                                {err && <p className='text-xs text-red-500 font-medium'>*{err}</p>}
+
+                                                <button
+                                                    className='w-full h-11 rounded-xl bg-black text-white font-semibold hover:bg-gray-900 transition flex justify-center items-center cursor-pointer disabled:opacity-50'
+                                                    disabled={loading}
+                                                    onClick={handleForgotPasswordSendOtp}
+                                                >
+                                                    {!loading ? "Send Password Reset OTP" : <CircleDashed size={18} color='white' className='animate-spin' />}
+                                                </button>
+                                            </div>
+
+                                            <p className='mt-6 text-center text-sm text-gray-500'>
+                                                Remember your password?{" "}
+                                                <span onClick={() => { setStep("login"); setErr(""); setSuccessMsg("") }} className='text-black font-semibold hover:underline cursor-pointer ml-1'>
+                                                    Back to Login
+                                                </span>
+                                            </p>
+                                        </motion.div>
+                                    )}
+
+                                    {/* 5. RESET PASSWORD STEP (ENTER OTP + NEW PASSWORD) */}
+                                    {step === "reset-password" && (
+                                        <motion.div
+                                            key="reset-password"
+                                            initial={{ opacity: 0, x: 20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: -20 }}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <button
+                                                    onClick={() => { setStep("forgot-password"); setErr(""); setSuccessMsg("") }}
+                                                    className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-black font-bold cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition"
+                                                >
+                                                    <ArrowLeft size={14} /> Back
+                                                </button>
+                                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                                                    Reset Step 2 of 2
+                                                </span>
+                                            </div>
+
+                                            <h2 className='text-xl font-bold mt-4 text-gray-900'>Set New Password</h2>
+
+                                            {/* Email Address badge with Change option */}
+                                            <div className="mt-3 flex items-center justify-between p-3 rounded-2xl bg-gray-50 border border-gray-200">
+                                                <div className="min-w-0 flex-1 mr-2">
+                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Sent code to</p>
+                                                    <p className="text-xs sm:text-sm font-semibold text-gray-900 truncate" title={email}>
+                                                        {email}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => { setStep("forgot-password"); setErr(""); setSuccessMsg("") }}
+                                                    className="flex-shrink-0 text-xs font-bold text-blue-600 hover:text-blue-800 bg-white hover:bg-blue-50 border border-gray-200 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                                    title="Correct email address"
+                                                >
+                                                    <Edit3 size={12} />
+                                                    <span>Change</span>
+                                                </button>
+                                            </div>
+
+                                            {successMsg && (
+                                                <p className="mt-3 text-xs font-semibold text-emerald-700 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 flex items-center gap-2">
+                                                    <CheckCircle2 size={15} className="flex-shrink-0 text-emerald-600" />
+                                                    <span>{successMsg}</span>
+                                                </p>
+                                            )}
+
+                                            <p className="text-xs text-gray-600 font-semibold mt-4 mb-2">Enter 6-Digit OTP:</p>
+                                            <div className='flex justify-between gap-2' onPaste={handlePasteOtp}>
+                                                {otp.map((digit, i) => (
+                                                    <input
+                                                        key={i}
+                                                        id={`otp-${i}`}
+                                                        value={digit}
+                                                        maxLength={1}
+                                                        className='w-10 h-12 sm:w-12 text-center text-xl font-mono font-black rounded-xl bg-gray-50 border-2 border-gray-200 outline-none focus:border-black focus:bg-white transition'
+                                                        onChange={(e) => handleChangeOtp(i, e.target.value)}
+                                                    />
+                                                ))}
+                                            </div>
+
+                                            <div className="mt-4 space-y-3">
+                                                <div className='flex items-center gap-3 border border-black/20 rounded-xl px-4 py-2.5 focus-within:border-black transition'>
+                                                    <Lock size={18} className='text-gray-500 flex-shrink-0' />
+                                                    <input
+                                                        type={showNewPassword ? "text" : "password"}
+                                                        placeholder='New Password (min. 6 chars)'
+                                                        className='w-full bg-transparent outline-none text-sm'
+                                                        onChange={(e) => setNewPassword(e.target.value)}
+                                                        value={newPassword}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowNewPassword(p => !p)}
+                                                        className="text-gray-400 hover:text-black transition cursor-pointer p-0.5 flex-shrink-0"
+                                                        title={showNewPassword ? "Hide password" : "Show password"}
+                                                    >
+                                                        {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                                    </button>
+                                                </div>
+
+                                                <div className='flex items-center gap-3 border border-black/20 rounded-xl px-4 py-2.5 focus-within:border-black transition'>
+                                                    <Lock size={18} className='text-gray-500 flex-shrink-0' />
+                                                    <input
+                                                        type={showConfirmPassword ? "text" : "password"}
+                                                        placeholder='Confirm New Password'
+                                                        className='w-full bg-transparent outline-none text-sm'
+                                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                                        value={confirmPassword}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowConfirmPassword(p => !p)}
+                                                        className="text-gray-400 hover:text-black transition cursor-pointer p-0.5 flex-shrink-0"
+                                                        title={showConfirmPassword ? "Hide password" : "Show password"}
+                                                    >
+                                                        {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {err && <p className='mt-3 text-xs text-red-500 font-semibold'>*{err}</p>}
+
+                                            <button
+                                                className='mt-4 w-full h-11 rounded-xl bg-black text-white font-bold hover:bg-gray-900 flex justify-center items-center transition cursor-pointer disabled:opacity-50 shadow-md'
+                                                disabled={loading}
+                                                onClick={handleResetPassword}
+                                            >
+                                                {!loading ? "Reset Password & Login" : <CircleDashed size={18} color='white' className='animate-spin' />}
+                                            </button>
+
+                                            {/* Resend OTP Bar */}
+                                            <div className="mt-3 flex items-center justify-between p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-xs">
+                                                <span className="text-gray-500">Didn't receive code?</span>
+                                                <button
+                                                    onClick={handleResendForgotPasswordOtp}
+                                                    disabled={countdown > 0 || resending}
+                                                    className="font-bold text-black hover:text-blue-600 disabled:opacity-40 disabled:hover:text-black cursor-pointer flex items-center gap-1.5 transition"
+                                                >
+                                                    {resending ? (
+                                                        <CircleDashed size={13} className="animate-spin text-blue-600" />
+                                                    ) : (
+                                                        <RotateCw size={13} />
+                                                    )}
+                                                    <span>{countdown > 0 ? `Resend in ${countdown}s` : "Resend OTP"}</span>
+                                                </button>
+                                            </div>
+
+                                            <p className="mt-2.5 text-[11px] text-gray-400 text-center">
                                                 💡 Please check your <strong>Spam</strong> or <strong>Junk</strong> folder if you don't see it in your inbox.
                                             </p>
                                         </motion.div>
