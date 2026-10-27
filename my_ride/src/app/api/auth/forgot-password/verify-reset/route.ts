@@ -23,7 +23,11 @@ export async function POST(req: NextRequest) {
 
         await connectDb();
         const normalizedEmail = email.toLowerCase().trim();
-        const user = await User.findOne({ email: normalizedEmail });
+
+        // O(1) query with lean field projection (only fetch otp and expiry)
+        const user = await User.findOne({ email: normalizedEmail })
+            .select("_id otp otpExpiresAt")
+            .lean();
 
         if (!user) {
             return NextResponse.json(
@@ -48,23 +52,33 @@ export async function POST(req: NextRequest) {
 
         // Hash the new password
         const hashedPassword = await bcrypt.hash(newPassword, 10);
-        user.password = hashedPassword;
-        user.otp = undefined;
-        user.otpExpiresAt = undefined;
-        user.isEmailVerified = true;
-        await user.save();
+
+        // Atomic update and field unsets (clears OTP from memory and disk)
+        await User.updateOne(
+            { _id: user._id },
+            {
+                $set: {
+                    password: hashedPassword,
+                    isEmailVerified: true
+                },
+                $unset: {
+                    otp: 1,
+                    otpExpiresAt: 1
+                }
+            }
+        );
 
         console.log(`[AUTH] Password successfully reset for user [${normalizedEmail}]`);
 
         return NextResponse.json({
             success: true,
-            message: "Password reset successfully! You can now log in with your new password."
-        }, { status: 200 });
+            message: "Password reset successfully. You can now log in with your new password."
+        });
 
-    } catch (error) {
-        console.error("Forgot password verify-reset error:", error);
+    } catch (error: any) {
+        console.error("Error in forgot-password/verify-reset:", error);
         return NextResponse.json(
-            { message: `Password reset failed: ${error}` },
+            { message: error?.message || "Internal server error. Please try again." },
             { status: 500 }
         );
     }

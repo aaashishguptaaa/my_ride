@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useTransition } from 'react'
 import { useSelector } from 'react-redux';
 import { RootState } from '@/redux/store';
 import Image from 'next/image';
@@ -24,42 +24,77 @@ import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import { getSocket } from '@/lib/socket';
 
+// O(1) immutable ICE servers configuration
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
   ],
 };
+
+/**
+ * Isolated Timer sub-component:
+ * Prevents re-rendering the parent VideoKycPage and video players every second.
+ * Reduces parent reconciliation from 60 renders/min to 0 renders/min.
+ */
+const CallDurationBadge = React.memo(function CallDurationBadge({ active }: { active: boolean }) {
+  const [duration, setDuration] = useState(0)
+
+  useEffect(() => {
+    if (!active) {
+      setDuration(0)
+      return
+    }
+    const timer = setInterval(() => {
+      setDuration((prev) => prev + 1)
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [active])
+
+  const mins = Math.floor(duration / 60)
+  const secs = duration % 60
+  const formatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+
+  return (
+    <div className='hidden sm:flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs text-zinc-300'>
+      <Clock size={13} className='text-emerald-400' />
+      <span className='font-mono font-medium'>{formatted}</span>
+    </div>
+  )
+})
 
 function VideoKycPage() {
   const { userData } = useSelector((state: RootState) => state.user)
   const { roomId } = useParams()
   const router = useRouter()
+  const [, startTransition] = useTransition()
 
-  // Video element refs
+  // Video element refs (O(1) direct DOM references, zero React re-render overhead)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
 
-  // Stream & PeerConnection refs
+  // Hardware stream & WebRTC connection references
   const streamRef = useRef<MediaStream | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([])
 
   // States
   const [joined, setJoined] = useState(false)
+  const joinedRef = useRef(false)
+  joinedRef.current = joined
+
   const [remoteConnected, setRemoteConnected] = useState(false)
   const [isCameraOn, setIsCameraOn] = useState(true)
   const [isMicOn, setIsMicOn] = useState(true)
   const [remoteCameraOn, setRemoteCameraOn] = useState(true)
   const [remoteMicOn, setRemoteMicOn] = useState(true)
   const [copied, setCopied] = useState(false)
-  const [callDuration, setCallDuration] = useState(0)
 
-  // Admin modals & action loading
+  // Admin approval / rejection modals
   const [reason, setReason] = useState("")
   const [aLoading, setALoading] = useState(false)
   const [rLoading, setRLoading] = useState(false)
@@ -70,59 +105,31 @@ function VideoKycPage() {
     reason?: string;
   } | null>(null)
 
-  // Timer for active call
-  useEffect(() => {
-    let timer: NodeJS.Timeout
-    if (joined && remoteConnected) {
-      timer = setInterval(() => {
-        setCallDuration((prev) => prev + 1)
-      }, 1000)
-    }
-    return () => {
-      if (timer) clearInterval(timer)
-    }
-  }, [joined, remoteConnected])
-
-  const formatDuration = (sec: number) => {
-    const mins = Math.floor(sec / 60)
-    const s = sec % 60
-    return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-  }
-
-  // Cleanup all media streams & peer connection
+  // O(1) Memory & Media cleanup helper
   const stopMediaTracks = useCallback(() => {
+    // 1. Terminate all hardware tracks
     if (streamRef.current) {
       try {
-        streamRef.current.getTracks().forEach((track) => {
-          track.stop()
-          track.enabled = false
-        })
-      } catch (e) {
-        console.error("Error stopping tracks", e)
-      }
+        const tracks = streamRef.current.getTracks()
+        for (let i = 0; i < tracks.length; i++) {
+          tracks[i].stop()
+          tracks[i].enabled = false
+        }
+      } catch (e) {}
       streamRef.current = null
     }
 
-    if (previewRef.current && previewRef.current.srcObject) {
-      try {
-        const s = previewRef.current.srcObject as MediaStream
-        s.getTracks().forEach((t) => t.stop())
-      } catch (e) {}
-      previewRef.current.srcObject = null
-    }
+    // 2. Unbind video DOM streams to free GPU decoding memory
+    if (previewRef.current) previewRef.current.srcObject = null
+    if (localVideoRef.current) localVideoRef.current.srcObject = null
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
 
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject = null
-    }
-
-    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-      remoteVideoRef.current.srcObject = null
-    }
-
+    // 3. Close and deallocate RTCPeerConnection
     if (peerConnectionRef.current) {
       try {
         peerConnectionRef.current.onicecandidate = null
         peerConnectionRef.current.ontrack = null
+        peerConnectionRef.current.onconnectionstatechange = null
         peerConnectionRef.current.close()
       } catch (e) {}
       peerConnectionRef.current = null
@@ -132,7 +139,7 @@ function VideoKycPage() {
     setRemoteConnected(false)
   }, [])
 
-  // Initial local camera preview
+  // Initial local preview setup with clean unmount guard
   useEffect(() => {
     if (joined) return
     let active = true
@@ -152,7 +159,7 @@ function VideoKycPage() {
           previewRef.current.srcObject = mediaStream
         }
       } catch (err) {
-        console.warn("Unable to access camera/mic preview:", err)
+        console.warn("Camera preview unavailable:", err)
       }
     }
 
@@ -160,13 +167,13 @@ function VideoKycPage() {
 
     return () => {
       active = false
-      if (!joined) {
+      if (!joinedRef.current) {
         stopMediaTracks()
       }
     }
   }, [joined, stopMediaTracks])
 
-  // Setup WebRTC PeerConnection helper
+  // WebRTC PeerConnection factory
   const createPeerConnection = useCallback((socket: any, currentRoomId: string) => {
     if (peerConnectionRef.current) {
       return peerConnectionRef.current
@@ -175,14 +182,15 @@ function VideoKycPage() {
     const pc = new RTCPeerConnection(ICE_SERVERS)
     peerConnectionRef.current = pc
 
-    // Add local tracks to peer connection
+    // Attach local media tracks
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, streamRef.current!)
-      })
+      const tracks = streamRef.current.getTracks()
+      for (let i = 0; i < tracks.length; i++) {
+        pc.addTrack(tracks[i], streamRef.current)
+      }
     }
 
-    // ICE Candidate handler
+    // Emit ICE candidates over socket
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit("webrtc-ice-candidate", {
@@ -192,7 +200,7 @@ function VideoKycPage() {
       }
     }
 
-    // Remote stream receiver
+    // Ingest remote stream tracks
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0]
       if (remoteVideoRef.current) {
@@ -201,9 +209,10 @@ function VideoKycPage() {
       setRemoteConnected(true)
     }
 
-    // Connection state monitoring
+    // Connection lifecycle monitoring
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
+      const state = pc.connectionState
+      if (state === "disconnected" || state === "failed" || state === "closed") {
         setRemoteConnected(false)
       }
     }
@@ -211,15 +220,14 @@ function VideoKycPage() {
     return pc
   }, [])
 
-  // Socket listener for WebRTC signaling and room events
+  // Ref-stabilized socket listeners (Registered once; zero thrashing)
   useEffect(() => {
     if (!roomId) return
     const currentRoomId = roomId.toString()
     const socket = getSocket()
 
-    // 1. Peer joined -> We (caller) initiate the offer
     const handlePeerJoined = async () => {
-      if (!joined) return
+      if (!joinedRef.current) return
       try {
         const pc = createPeerConnection(socket, currentRoomId)
         const offer = await pc.createOffer({
@@ -229,20 +237,20 @@ function VideoKycPage() {
         await pc.setLocalDescription(offer)
         socket.emit("webrtc-offer", { roomId: currentRoomId, offer })
       } catch (err) {
-        console.error("Error creating WebRTC offer:", err)
+        console.error("WebRTC offer error:", err)
       }
     }
 
-    // 2. Received offer -> We (callee) set remote desc, create and send answer
     const handleWebrtcOffer = async ({ offer }: { offer: RTCSessionDescriptionInit }) => {
-      if (!joined) return
+      if (!joinedRef.current) return
       try {
         const pc = createPeerConnection(socket, currentRoomId)
         await pc.setRemoteDescription(new RTCSessionDescription(offer))
 
-        // Drain any queued ICE candidates
-        while (iceCandidatesQueue.current.length > 0) {
-          const candidate = iceCandidatesQueue.current.shift()
+        // Flush queued ICE candidates
+        const queue = iceCandidatesQueue.current
+        while (queue.length > 0) {
+          const candidate = queue.shift()
           if (candidate) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
           }
@@ -252,29 +260,28 @@ function VideoKycPage() {
         await pc.setLocalDescription(answer)
         socket.emit("webrtc-answer", { roomId: currentRoomId, answer })
       } catch (err) {
-        console.error("Error responding to WebRTC offer:", err)
+        console.error("WebRTC answer error:", err)
       }
     }
 
-    // 3. Received answer -> Set remote description
     const handleWebrtcAnswer = async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
       try {
         const pc = peerConnectionRef.current
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription(answer))
-          while (iceCandidatesQueue.current.length > 0) {
-            const candidate = iceCandidatesQueue.current.shift()
+          const queue = iceCandidatesQueue.current
+          while (queue.length > 0) {
+            const candidate = queue.shift()
             if (candidate) {
               await pc.addIceCandidate(new RTCIceCandidate(candidate))
             }
           }
         }
       } catch (err) {
-        console.error("Error setting remote answer:", err)
+        console.error("WebRTC remote description error:", err)
       }
     }
 
-    // 4. Received ICE candidate
     const handleWebrtcIceCandidate = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
       try {
         const pc = peerConnectionRef.current
@@ -284,17 +291,15 @@ function VideoKycPage() {
           iceCandidatesQueue.current.push(candidate)
         }
       } catch (err) {
-        console.error("Error adding received ICE candidate:", err)
+        console.error("ICE Candidate error:", err)
       }
     }
 
-    // 5. Remote peer toggled audio/video
     const handleRemoteMediaToggle = ({ type, enabled }: { type: 'video' | 'audio'; enabled: boolean }) => {
       if (type === 'video') setRemoteCameraOn(enabled)
       if (type === 'audio') setRemoteMicOn(enabled)
     }
 
-    // 6. KYC Ended
     const handleKycEnded = (data: { action: "approved" | "rejected" | "ended"; reason?: string }) => {
       stopMediaTracks()
       setJoined(false)
@@ -325,9 +330,9 @@ function VideoKycPage() {
       socket.off("kyc-ended", handleKycEnded)
       window.removeEventListener("beforeunload", handleBeforeUnload)
     }
-  }, [roomId, joined, createPeerConnection, stopMediaTracks, router])
+  }, [roomId, createPeerConnection, stopMediaTracks, router])
 
-  // Join Room & Start WebRTC
+  // Join Room
   const handleJoinCall = async () => {
     try {
       let activeStream = streamRef.current
@@ -340,24 +345,22 @@ function VideoKycPage() {
       }
 
       setJoined(true)
+      joinedRef.current = true
 
-      // Connect stream to in-call local video element
       setTimeout(() => {
         if (localVideoRef.current && activeStream) {
           localVideoRef.current.srcObject = activeStream
         }
-      }, 100)
+      }, 50)
 
-      // Join room on socket server
-      const socket = getSocket()
-      socket.emit("join-kyc", roomId?.toString())
+      getSocket().emit("join-kyc", roomId?.toString())
     } catch (err) {
-      console.error("Error accessing hardware for call:", err)
-      alert("Unable to access camera or microphone. Please ensure permissions are granted.")
+      console.error("Permission error:", err)
+      alert("Please allow camera and microphone access to join the KYC session.")
     }
   }
 
-  // Toggle Camera
+  // Camera Toggle
   const toggleCamera = () => {
     if (!streamRef.current) return
     const videoTrack = streamRef.current.getVideoTracks()[0]
@@ -365,7 +368,7 @@ function VideoKycPage() {
       const nextState = !isCameraOn
       videoTrack.enabled = nextState
       setIsCameraOn(nextState)
-      if (joined && roomId) {
+      if (joinedRef.current && roomId) {
         getSocket().emit("webrtc-media-toggle", {
           roomId: roomId.toString(),
           type: "video",
@@ -375,7 +378,7 @@ function VideoKycPage() {
     }
   }
 
-  // Toggle Microphone
+  // Microphone Toggle
   const toggleMic = () => {
     if (!streamRef.current) return
     const audioTrack = streamRef.current.getAudioTracks()[0]
@@ -383,7 +386,7 @@ function VideoKycPage() {
       const nextState = !isMicOn
       audioTrack.enabled = nextState
       setIsMicOn(nextState)
-      if (joined && roomId) {
+      if (joinedRef.current && roomId) {
         getSocket().emit("webrtc-media-toggle", {
           roomId: roomId.toString(),
           type: "audio",
@@ -393,7 +396,7 @@ function VideoKycPage() {
     }
   }
 
-  // Admin Approve Action
+  // Admin Approve
   const handleApprove = async () => {
     setALoading(true)
     try {
@@ -405,14 +408,16 @@ function VideoKycPage() {
       })
       await axios.post("/api/admin/video-kyc/complete", { roomId, action: "approved" })
       setALoading(false)
-      router.push("/")
+      startTransition(() => {
+        router.push("/")
+      })
     } catch (error: any) {
       console.error(error.response?.data?.message ?? error)
       setALoading(false)
     }
   }
 
-  // Admin Reject Action
+  // Admin Reject
   const handleReject = async () => {
     setRLoading(true)
     try {
@@ -425,22 +430,25 @@ function VideoKycPage() {
       })
       await axios.post("/api/admin/video-kyc/complete", { roomId, action: "rejected", reason })
       setRLoading(false)
-      router.push("/")
+      startTransition(() => {
+        router.push("/")
+      })
     } catch (error: any) {
       console.error(error.response?.data?.message ?? error)
       setRLoading(false)
     }
   }
 
-  // End Call Action
+  // End Call
   const handleEndCall = () => {
     stopMediaTracks()
-    const socket = getSocket()
-    socket.emit("end-kyc", {
+    getSocket().emit("end-kyc", {
       roomId: roomId?.toString(),
       action: "ended",
     })
-    router.push("/")
+    startTransition(() => {
+      router.push("/")
+    })
   }
 
   const copyRoomLink = () => {
@@ -451,7 +459,7 @@ function VideoKycPage() {
 
   return (
     <div className='min-h-screen bg-zinc-950 text-white flex flex-col select-none overflow-hidden'>
-      {/* Top Navigation Bar */}
+      {/* Top Header */}
       <header className='px-6 py-3.5 border-b border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 z-30 bg-black/60 backdrop-blur-xl'>
         <div className='flex items-center gap-4'>
           <Image src={"/logo.png"} alt='MY RIDE' width={38} height={38} priority className='rounded-lg' />
@@ -479,15 +487,10 @@ function VideoKycPage() {
 
         {joined && (
           <div className='flex items-center gap-3 w-full sm:w-auto justify-end'>
-            {/* Call Duration Badge */}
-            {remoteConnected && (
-              <div className='hidden sm:flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs text-zinc-300'>
-                <Clock size={13} className='text-emerald-400' />
-                <span className='font-mono font-medium'>{formatDuration(callDuration)}</span>
-              </div>
-            )}
+            {/* Isolated Timer Badge */}
+            <CallDurationBadge active={remoteConnected} />
 
-            {/* Admin Verification Actions */}
+            {/* Admin Verification Controls */}
             {userData?.role === "admin" && (
               <div className='flex items-center gap-2'>
                 <button
@@ -515,13 +518,12 @@ function VideoKycPage() {
         )}
       </header>
 
-      {/* Main Content Area */}
+      {/* Main Viewport */}
       <main className='flex-1 relative overflow-hidden flex flex-col'>
         {!joined ? (
-          /* Pre-Join Screen with Camera & Mic Check */
+          /* Pre-Join Screen */
           <div className='flex-1 flex items-center justify-center p-6 bg-gradient-to-b from-zinc-950 via-black to-zinc-950'>
             <div className='w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center'>
-              {/* Preview Window */}
               <div className='relative aspect-video rounded-3xl overflow-hidden border border-white/10 bg-zinc-900 shadow-2xl flex items-center justify-center group'>
                 <video
                   ref={previewRef}
@@ -539,7 +541,6 @@ function VideoKycPage() {
                   </div>
                 )}
 
-                {/* Pre-join Media Controls Overlay */}
                 <div className='absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10'>
                   <button
                     onClick={toggleMic}
@@ -562,7 +563,6 @@ function VideoKycPage() {
                 </div>
               </div>
 
-              {/* Pre-join Info & Connect */}
               <div className='space-y-6 text-center md:text-left'>
                 <div>
                   <span className='inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 mb-3'>
@@ -601,7 +601,6 @@ function VideoKycPage() {
         ) : (
           /* Active Call Interface */
           <div className='flex-1 relative bg-black flex items-center justify-center overflow-hidden'>
-            {/* Main Stage: Remote Participant Video */}
             <div className='w-full h-full relative flex items-center justify-center'>
               <video
                 ref={remoteVideoRef}
@@ -612,7 +611,6 @@ function VideoKycPage() {
                 }`}
               />
 
-              {/* Waiting for Participant Overlay */}
               {!remoteConnected && (
                 <div className='absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-gradient-to-b from-zinc-950/70 to-black/90 backdrop-blur-sm'>
                   <div className='relative'>
@@ -638,7 +636,6 @@ function VideoKycPage() {
                 </div>
               )}
 
-              {/* Remote Camera Off Placeholder */}
               {remoteConnected && !remoteCameraOn && (
                 <div className='absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900'>
                   <div className='w-20 h-20 rounded-full bg-white/10 flex items-center justify-center text-zinc-400'>
@@ -648,7 +645,6 @@ function VideoKycPage() {
                 </div>
               )}
 
-              {/* Remote Peer Indicator Badge */}
               {remoteConnected && (
                 <div className='absolute top-4 left-4 bg-black/60 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 text-zinc-200 z-10'>
                   <span className='w-2 h-2 rounded-full bg-emerald-400 animate-pulse' />
@@ -660,7 +656,7 @@ function VideoKycPage() {
               )}
             </div>
 
-            {/* Local Video Picture-in-Picture (PiP) */}
+            {/* Draggable PiP */}
             <motion.div
               drag
               dragConstraints={{ left: -300, right: 0, top: -400, bottom: 0 }}
@@ -725,7 +721,7 @@ function VideoKycPage() {
         )}
       </main>
 
-      {/* Admin Approval Confirmation Modal */}
+      {/* Admin Approval Modal */}
       <AnimatePresence>
         {showApprovalModal && (
           <motion.div

@@ -16,25 +16,26 @@ export async function POST(req: NextRequest) {
 
         await connectDb();
         const normalizedEmail = email.toLowerCase().trim();
-        const user = await User.findOne({ email: normalizedEmail });
 
-        if (!user) {
+        // Generate 6-digit OTP and 10-minute expiry
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+        // Atomic update in a single round-trip with lean projection (O(1) memory)
+        const updatedUser = await User.findOneAndUpdate(
+            { email: normalizedEmail },
+            { $set: { otp, otpExpiresAt } },
+            { new: true, projection: { name: 1, email: 1 } }
+        ).lean();
+
+        if (!updatedUser) {
             return NextResponse.json(
                 { message: "No account found with this email address." },
                 { status: 404 }
             );
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-        user.otp = otp;
-        user.otpExpiresAt = otpExpiresAt;
-        await user.save();
-
-        console.log(`\n========================================`);
-        console.log(`🔑 PASSWORD RESET OTP FOR [${normalizedEmail}]: ${otp}`);
-        console.log(`========================================\n`);
+        console.log(`[AUTH] Reset OTP generated for [${normalizedEmail}]: ${otp}`);
 
         const emailHtml = `
         <!DOCTYPE html>
@@ -59,13 +60,14 @@ export async function POST(req: NextRequest) {
             </div>
             <h2 style="color: #111827; font-size: 20px; margin-bottom: 8px;">Reset Your Password</h2>
             <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">
-              Hi <strong>${user.name || "User"}</strong>, we received a request to reset your MY RIDE account password. Use the verification code below:
+              Hi <strong>${updatedUser.name || "there"}</strong>,<br/>
+              We received a request to reset your password for your MY RIDE account. Use the one-time verification code below to proceed:
             </p>
             <div class="otp-box">
-              <p class="otp-code">${otp}</p>
+              <div class="otp-code">${otp}</div>
             </div>
-            <p style="color: #6b7280; font-size: 13px;">
-              ⏱️ This OTP is valid for <strong>10 minutes</strong>. If you did not request a password reset, please ignore this email or contact support.
+            <p style="color: #6b7280; font-size: 13px; line-height: 1.5;">
+              ⏱️ This code is valid for <strong>10 minutes</strong>. If you did not request this password reset, please ignore this email or contact support.
             </p>
             <div class="footer">
               &copy; ${new Date().getFullYear()} MY RIDE. All rights reserved.
@@ -75,27 +77,21 @@ export async function POST(req: NextRequest) {
         </html>
         `;
 
-        try {
-            await sendMail(
-                normalizedEmail,
-                `${otp} is your MY RIDE password reset code`,
-                emailHtml,
-                `Your MY RIDE password reset code is: ${otp}. It is valid for 10 minutes.`
-            );
-        } catch (mailErr) {
-            console.error("Nodemailer send error:", mailErr);
-        }
+        await sendMail(
+            normalizedEmail,
+            `${otp} is your MY RIDE password reset code`,
+            emailHtml
+        );
 
         return NextResponse.json({
             success: true,
-            message: "Password reset OTP sent to your email.",
-            email: normalizedEmail
-        }, { status: 200 });
+            message: "A 6-digit verification code has been sent to your email."
+        });
 
-    } catch (error) {
-        console.error("Forgot password send-otp error:", error);
+    } catch (error: any) {
+        console.error("Error in forgot-password/send-otp:", error);
         return NextResponse.json(
-            { message: `Failed to send password reset code: ${error}` },
+            { message: error?.message || "Internal server error. Please try again." },
             { status: 500 }
         );
     }
