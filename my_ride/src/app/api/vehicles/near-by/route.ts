@@ -3,18 +3,18 @@ import User from "@/models/user.model";
 import Vehicle from "@/models/vehicle.model";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(req:NextRequest) {
+export async function POST(req: NextRequest) {
     try {
-        await connectDb()
-        const {latitude,longitude,vehicleType}=await req.json()
-        if(!latitude||!longitude){
+        await connectDb();
+        const { latitude, longitude, vehicleType } = await req.json();
+        if (!latitude || !longitude) {
             return NextResponse.json(
-                {message:"coordinates not found"},
-                {status:400}
-            )
+                { message: "coordinates not found" },
+                { status: 400 }
+            );
         }
 
-        // 1. Try finding nearby online partners within 15km
+        // 1. O(1) memory projection: Only fetch _id for nearby online partners within 15km
         let partners = await User.find({
             role: "partner",
             partnerStatus: "approved",
@@ -28,7 +28,7 @@ export async function POST(req:NextRequest) {
                     $maxDistance: 15000
                 }
             }
-        }).lean();
+        }).select("_id").lean();
 
         let partnerIds = partners.map(p => p._id);
 
@@ -38,7 +38,7 @@ export async function POST(req:NextRequest) {
                 role: "partner",
                 partnerStatus: "approved",
                 isOnline: true
-            }).limit(10).lean();
+            }).select("_id").limit(10).lean();
             partnerIds = fallbackPartners.map(p => p._id);
         }
 
@@ -56,11 +56,10 @@ export async function POST(req:NextRequest) {
 
         return NextResponse.json(vehicles, { status: 200 });
 
-
     } catch (error) {
         return NextResponse.json(
-                {message:`near by vehicles error ${error}`},
-                {status:500}
-            )
+            { message: `near by vehicles error ${error}` },
+            { status: 500 }
+        );
     }
 }
