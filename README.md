@@ -10,7 +10,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB%20Atlas-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 
 <p align="center">
-  <b>A production-ready full-stack ride booking platform engineered with Next.js 16, React 19, WebSockets, MongoDB, and live Video KYC.</b>
+  <b>A production-ready full-stack ride booking platform engineered with Next.js 16, React 19, WebSockets, MongoDB, and Native WebRTC Peer-to-Peer Video KYC.</b>
   <br />
   <a href="https://myride-ten.vercel.app"><strong>Explore Live Demo »</strong></a>
 </p>
@@ -26,7 +26,7 @@
 - **Dynamic Driver Availability:** Drivers control when their vehicles are visible to passengers via an instant Online/Offline status switch.
 - **Two-Sided Safety:** Verification with Pickup OTP and Drop-off confirmation ensures safe passenger pickups and verified ride completion.
 - **Flexible Payments:** Passengers can choose to pay upfront or pay comfortably after reaching their destination.
-- **Rigorous Partner Onboarding:** Comprehensive driver validation with document uploads, pricing review, and live **ZEGOCLOUD Video KYC**.
+- **Rigorous Partner Onboarding:** Comprehensive driver validation with document uploads, pricing review, and live **Native WebRTC Peer-to-Peer Video KYC**.
 
 ---
 
@@ -94,7 +94,7 @@ PASSENGER                      SYSTEM / CLOUD                      DRIVER / RIDE
   2. Document Uploads (License, RC, Insurance via Cloudinary)
   3. Bank Account & Payout Info
   4. Document Review
-  5. **Live Video KYC Call:** Face-to-face video verification with the admin powered by **ZEGOCLOUD**.
+  5. **Live Video KYC Call:** Face-to-face video verification with the admin powered by custom **Native WebRTC & Socket.IO Signaling**.
   6. Custom Fare & Pricing Setup
   7. Final Review
   8. **Live & Active:** Instant transition to active driver status.
@@ -123,7 +123,7 @@ PASSENGER                      SYSTEM / CLOUD                      DRIVER / RIDE
 | **Realtime Engine** | **Socket.IO** (Client & Server), Express.js |
 | **Database & ODM** | **MongoDB Atlas**, **Mongoose** (with indexed geospatial queries) |
 | **Authentication** | **NextAuth.js v5** (JWT sessions, Email OTP via Nodemailer, Google OAuth) |
-| **Video Calling** | **ZEGOCLOUD UIKit Prebuilt** (WebRTC Video KYC) |
+| **Video Calling** | **Native WebRTC (`RTCPeerConnection`) with Socket.IO Signaling** (Zero 3rd-party dependencies, 100% Free Forever) |
 | **Maps & Routing** | **Leaflet**, **React-Leaflet**, **Geoapify Geocoding API** |
 | **Payment Gateway** | **Razorpay** (Orders API, Webhooks, Signature Verification) |
 | **File Storage** | **Cloudinary** (Secure document & vehicle image hosting) |
@@ -149,7 +149,7 @@ my_ride/
 │   │   │   │   └── vehicles/     # Geospatial vehicle lookup (online-only)
 │   │   │   ├── partner/          # Driver onboarding, active cockpit, pending requests
 │   │   │   ├── user/             # Passenger ride booking, radar search, checkout
-│   │   │   └── video-kyc/        # ZEGOCLOUD Video KYC call room
+│   │   │   └── video-kyc/        # Native WebRTC P2P Video KYC room
 │   │   ├── components/           # Reusable UI widgets, Nav, Maps, Modals
 │   │   ├── hooks/                # Custom React hooks (useGetMe, etc.)
 │   │   ├── lib/                  # Database connection, Cloudinary, Razorpay, Mailer
@@ -174,7 +174,7 @@ my_ride/
 | :--- | :--- |
 | 🚖 **Passenger** | • Instant nearby vehicle lookup with interactive Leaflet map routing<br/>• Real-time driver radar and live vehicle tracking<br/>• Pickup OTP verification for passenger safety<br/>• In-ride live chat with AI smart suggestions<br/>• Flexible payment options: pay advance or comfortably upon destination drop-off |
 | 🚗 **Driver / Partner** | • Instant 1-tap **Online / Offline** status switch (controls vehicle visibility on the map)<br/>• Real-time WebSocket dispatch alerts with sub-second delivery<br/>• Atomic concurrency acceptance (zero duplicate bookings)<br/>• Active ride cockpit with live radar and pickup verification<br/>• Earnings and trip history tracker<br/>• 1-click seamless switch to Passenger Mode (zero re-verification needed) |
-| 🛡️ **Admin** | • Multi-vendor partner and document review dashboard<br/>• Real-time face-to-face **Video KYC** calling room via ZEGOCLOUD<br/>• Vehicle approval/rejection panel with custom feedback reasons<br/>• Financial oversight: platform commissions, partner earnings, and ride KPIs |
+| 🛡️ **Admin** | • Multi-vendor partner and document review dashboard<br/>• Real-time face-to-face **Video KYC** calling room via Native WebRTC P2P<br/>• Vehicle approval/rejection panel with custom feedback reasons<br/>• Financial oversight: platform commissions, partner earnings, and ride KPIs |
 
 ---
 
